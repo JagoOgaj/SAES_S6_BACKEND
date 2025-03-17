@@ -1,0 +1,17 @@
+isodate
+yt-dlp 
+whisper
+langdetect
+beautifulsoup4 
+transformers
+pinecone
+langchain
+langchain-community
+dotenv
+torch 
+psycopg2-binary 
+sentence-transformers
+sentencepiece
+accelerate
+langchain-pinecone 
+langchain-huggingface
