@@ -7,11 +7,21 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os, tempfile
 from dotenv import load_dotenv
-import whisper
 from langdetect import detect, DetectorFactory
-DetectorFactory.seed = 0  # Pour rendre la détection de langue déterministe
+import yt_dlp
+import whisper
+from threading import local
+thread_local = local()
 
+DetectorFactory.seed = 0  # Pour rendre la détection déterministe
 load_dotenv()
+
+
+def get_model():
+    if not hasattr(thread_local, "model"):
+        # Charge le modèle une seule fois par thread
+        thread_local.model = whisper.load_model("small", device="cpu")
+    return thread_local.model
 
 # -------------------------------------------------------------------
 # Paramètres de connexion à PostgreSQL
@@ -22,16 +32,6 @@ DB_PARAMS = {
     "password": os.environ.get('password'),
     "host": os.environ.get('host'),
 }
-
-# -------------------------------------------------------------------
-# Choix du modèle Whisper
-# -------------------------------------------------------------------
-# Pour tester différentes versions, changez la valeur de WHISPER_MODEL :
-# - "tiny"  : Très rapide, mais qualité inférieure.
-# - "base"  : Bon compromis entre rapidité et qualité.
-# - "small" : Meilleure qualité, plus lent.
-# - "medium"/"large" : Excellente qualité, nécessite un GPU pour de bonnes performances.
-WHISPER_MODEL = "medium"
 
 # -------------------------------------------------------------------
 # Web scraping pour récupérer le titre d'une vidéo
@@ -87,47 +87,61 @@ def insert_document(cursor, video_id, url, title, language, content):
         return cursor.fetchone()[0]
 
 # -------------------------------------------------------------------
-# Transcription avec Whisper (en utilisant un dossier temporaire)
-# Utilise le modèle défini dans WHISPER_MODEL
+# Transcription via Whisper (installation depuis GitHub)
 # -------------------------------------------------------------------
-def transcribe_video_whisper(video_url):
-    with tempfile.TemporaryDirectory() as tmpdir:
+def transcribe_video_asr(video_url):
+    """
+    Télécharge l'audio de la vidéo avec yt-dlp dans un dossier temporaire
+    et transcrit l'audio en utilisant Whisper.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(temp_dir, '%(id)s.%(ext)s'),
             'quiet': True,
+            'postprocessors': [{
+                 'key': 'FFmpegExtractAudio',
+                 'preferredcodec': 'wav',
+                 'preferredquality': '192',
+            }],
         }
-        import yt_dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(video_url, download=False)
             video_id = info_dict.get("id", None)
             ydl.download([video_url])
+        
         downloaded_file = None
-        for filename in os.listdir(tmpdir):
+        for filename in os.listdir(temp_dir):
             if filename.startswith(video_id):
-                downloaded_file = os.path.join(tmpdir, filename)
+                downloaded_file = os.path.join(temp_dir, filename)
                 break
+        
         if not downloaded_file:
             raise Exception("Fichier audio non trouvé dans le dossier temporaire")
-        # Charger le modèle Whisper selon le paramètre WHISPER_MODEL
-        model_whisper = whisper.load_model(WHISPER_MODEL)
-        result = model_whisper.transcribe(downloaded_file)
-        return result["text"]
-
+        
+        if os.path.getsize(downloaded_file) == 0:
+            raise Exception("Le fichier audio téléchargé est vide")
+        
+        # Utilisation de l'instance du modèle propre au thread
+        model_instance = get_model()
+        result = model_instance.transcribe(downloaded_file, language="fr", verbose=False)
+        
+        transcript = result["text"]
+        return transcript
 # -------------------------------------------------------------------
-# Récupération du transcript via Whisper
+# Récupération du transcript via ASR
 # -------------------------------------------------------------------
 def get_full_transcript(video_id):
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     print("Utilisation de Whisper pour transcrire la vidéo...")
     try:
-        return transcribe_video_whisper(video_url)
+        return transcribe_video_asr(video_url)
     except Exception as e:
         print(f"Erreur lors de la transcription pour {video_url}: {e}")
         return ""
 
 # -------------------------------------------------------------------
-# Extraction de l'ID d'une URL vidéo (récupère uniquement la partie avant le premier '&')
+# Extraction de l'ID d'une URL vidéo (garde uniquement la partie avant le premier '&')
 # -------------------------------------------------------------------
 def extract_id_from_url(url):
     base_url = url.split('&')[0]
@@ -137,7 +151,7 @@ def extract_id_from_url(url):
     return None
 
 # -------------------------------------------------------------------
-# Traitement d'une vidéo (sans calcul d'embeddings)
+# Traitement d'une vidéo (sans calcul d'embedding)
 # -------------------------------------------------------------------
 def process_video(video_url):
     video_id = extract_id_from_url(video_url)
