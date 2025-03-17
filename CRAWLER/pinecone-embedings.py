@@ -25,10 +25,10 @@ index = pc.Index(index_name)
 # Paramètres de connexion à PostgreSQL
 # -------------------------------------------------------------------
 DB_PARAMS = {
-    "database": "sae_db_education",
-    "user": "postgres",
-    "password": "root",
-    "host": "localhost",
+    "database": os.environ.get('database'),
+    "user": os.environ.get('user'),
+    "password": os.environ.get('password'),
+    "host": os.environ.get('host'),
 }
 
 # -------------------------------------------------------------------
