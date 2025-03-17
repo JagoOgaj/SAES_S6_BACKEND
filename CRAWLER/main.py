@@ -6,6 +6,10 @@ from langchain_huggingface import HuggingFaceEndpoint
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Configuration des clés API
 os.environ["PINECONE_API_KEY"] = os.environ.get("PINECONE_API_KEY")
 os.environ["HUGGINGFACEHUB_API_TOKEN"] = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
