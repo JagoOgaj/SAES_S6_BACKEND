@@ -6,19 +6,21 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os, tempfile
-
+from dotenv import load_dotenv
 import whisper
 from langdetect import detect, DetectorFactory
 DetectorFactory.seed = 0  # Pour rendre la détection de langue déterministe
+
+load_dotenv()
 
 # -------------------------------------------------------------------
 # Paramètres de connexion à PostgreSQL
 # -------------------------------------------------------------------
 DB_PARAMS = {
-    "database": "sae_db_education",
-    "user": "postgres",
-    "password": "root",
-    "host": "localhost",
+    "database": os.environ.get('database'),
+    "user": os.environ.get('user'),
+    "password": os.environ.get('password'),
+    "host": os.environ.get('host'),
 }
 
 # -------------------------------------------------------------------
