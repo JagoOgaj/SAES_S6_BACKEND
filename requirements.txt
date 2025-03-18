@@ -16,3 +16,5 @@ langchain-pinecone
 langchain-huggingface
 git+https://github.com/openai/whisper.git
 language-tool-python
+ffmpeg
+stanza
