@@ -1,0 +1,9 @@
+.venv
+
+.env
+
+**/__pycache__
+
+app.log**
+
+**/ai-models
