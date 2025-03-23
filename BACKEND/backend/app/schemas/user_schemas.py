@@ -49,7 +49,9 @@ class MessagesSchema(Schema):
         description="Type de message",
     )
     content = fields.String(allow_none=True, description="Contenu du message")
-    image = fields.String(allow_none=True, description="Image encodée en base64")
+    documents = fields.List(
+        fields.String(), allow_none=True, description="Liste des documents attachés"
+    )  # Champ optionnel
     created_at = fields.DateTime(
         required=True, description="Date de création du message"
     )

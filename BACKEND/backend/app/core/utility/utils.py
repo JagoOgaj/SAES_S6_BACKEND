@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from backend.app.core import ENUM_TIMEZONE
 from flask import jsonify, request
 import base64
-import cv2
 import numpy as np
 import requests
 from user_agents import parse

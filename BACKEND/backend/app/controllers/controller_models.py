@@ -16,42 +16,34 @@ bp_model = Blueprint(ENUM_BLUEPRINT_ID.MODEL.value, __name__)
 @bp_model.route(ENUM_ENDPOINT_MODEL.PREDICT.value, methods=[ENUM_METHODS.POST.value])
 def predict(typeModel: str):
     try:
-        if "image" not in request.files:
+        user_input = request.form.get("userInput", "").strip()
+        if not user_input:
             return create_json_response(
                 status_code=400,
                 status="fail",
-                message="Aucun fichier image ou base64 n'a été fourni.",
+                message="Le champ 'userInput' est requis.",
             )
 
-        image_file = request.files["image"]
+        documents = request.files.getlist("documents[]")
+        document_names = []
+        if documents:  # Vérification
+            for document in documents:
+                document_names.append(document.filename)
+
         model = Service_MODEL(typeModel)
-        message = model.handle_prediction(image_file)
-        return create_json_response(status="success", message=message)
-    except ValidationError as e:
-        create_json_response(
-            status_code=400,
-            status="fail",
-            message="Erreur dans la validation des données fournis",
-            details=f"{str(e)}",
+        message = model.handle_prediction(user_input, documents)
+
+        return create_json_response(
+            status="success",
+            message=message,
+            details={"userInput": user_input, "documents": document_names},
         )
-    except TypeError as e:
-        create_json_response(
-            status_code=404,
-            status="fail",
-            message="Erreur de type de donnée",
-            details=f"{str(e)}",
-        )
-    except ModelTypeNotFoundError as e:
-        create_json_response(
-            status_code=404,
-            status="fail",
-            message="Aucun model trouvée",
-            details=f"{str(e)}",
-        )
+    
     except Exception as e:
-        create_json_response(
-            status_code=404,
+        print(e)
+        return create_json_response(
+            status_code=500,
             status="fail",
-            message="Une erreur est survenue",
-            details=f"{str(e)}",
+            message="Une erreur est survenue.",
+            details=str(e),
         )

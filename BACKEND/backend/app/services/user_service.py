@@ -77,7 +77,6 @@ class Service_USER:
         service_db.delete_data(conversation)
 
     def createConversation(self: Self, data: dict) -> int:
-
         conversation = MODEL_CONVERSATION(
             conversation_id=service_db.get_next_sequence_value("conversation_id"),
             user_id=self._curentUserId,
@@ -91,7 +90,7 @@ class Service_USER:
                 MODEL_MESSAGE(
                     type=msg["type"],
                     content=msg.get("content"),
-                    image=msg.get("image"),
+                    documents=msg.get("documents") if "documents" in msg else None,  # Vérification
                     created_at=msg["created_at"],
                 )
             )
@@ -101,44 +100,29 @@ class Service_USER:
 
     def updateConversation(self: Self, messages: list, idConversation: int) -> None:
         try:
-            if not isinstance(idConversation, int):
-                raise TypeError("L'id de la conversation doit être un entier")
-
             conversation = MODEL_CONVERSATION.objects(
                 conversation_id=idConversation
             ).first()
             if not conversation:
-                raise ConversationNotFoundError(
-                    f"Conversation avec l'ID {idConversation} non trouvée."
-                )
+                raise ConversationNotFoundError(idConversation)
 
             if conversation.user_id != self._curentUserId:
-                raise NotAllowedToAccessThisConversationError(
-                    "Vous n'êtes pas autorisé à accéder à cette conversation."
-                )
+                raise NotAllowedToAccessThisConversationError(idConversation)
 
-            embedded_messages = [MODEL_MESSAGE(**msg).to_mongo() for msg in messages]
+            embedded_messages = [
+                MODEL_MESSAGE(
+                    type=msg["type"],
+                    content=msg.get("content"),
+                    documents=msg.get("documents") if "documents" in msg else None,  # Vérification
+                    created_at=msg["created_at"],
+                ).to_mongo()
+                for msg in messages
+            ]
 
             MODEL_CONVERSATION.objects(conversation_id=idConversation).update(
                 push__messages={"$each": embedded_messages},
                 set__updated_at=get_paris_time(),
             )
-
-        except TypeError as e:
-            raise TypeError("L'id de la conversation doit être un entier")
-
-        except ConversationNotFoundError as e:
-            raise ConversationNotFoundError(
-                f"Conversation avec l'ID {idConversation} non trouvée."
-            )
-
-        except NotAllowedToAccessThisConversationError as e:
-            raise NotAllowedToAccessThisConversationError(
-                "Vous n'êtes pas autorisé à accéder à cette conversation."
-            )
-
-        except ValidationError as e:
-            raise ValidationError(str(e))
 
         except Exception as e:
             raise Exception(

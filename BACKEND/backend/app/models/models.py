@@ -6,6 +6,7 @@ from mongoengine import (
     IntField,
     EmbeddedDocumentListField,
     BooleanField,
+    ListField,
 )
 from backend.app.core import ENUM_COLECTION_NAME
 from backend.app.core import get_paris_time
@@ -24,7 +25,7 @@ class MODEL_USER(Document):
 class MODEL_MESSAGE(EmbeddedDocument):
     type = StringField(required=True, choices=["user", "ia"])
     content = StringField()
-    image = StringField()
+    documents = ListField(StringField(), default=None)  # Champ optionnel
     created_at = DateTimeField(default=get_paris_time())
 
 
