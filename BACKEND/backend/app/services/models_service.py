@@ -19,7 +19,7 @@ load_dotenv()
 class Service_MODEL:
     def __init__(self: Self, typeModel: str) -> None:
         self.typeModel = typeModel
-        self.target_dimension = 768  # Taille cible fixée à 768
+        self.target_dimension = 768 
         
         self.hf_client = InferenceClient(
             model="mistralai/Mistral-7B-Instruct-v0.3",
@@ -31,41 +31,46 @@ class Service_MODEL:
             embedding=self.embeddings, 
             text_key='content'
         )
+    
         self.retriever = self.vectorstore.as_retriever(
-            search_type="similarity_score_threshold",  # Recherche rapide par similarité approximative
-            search_kwargs={
-                "k": 5,  # Réduit le nombre de documents retournés pour améliorer la vitesse
-                "score_threshold": 0.5  # Filtre les documents moins pertinents pour optimiser la recherche
-            }
+            search_type="similarity",
+            search_kwargs={"k": 5}
         )
         
-        # Initialisation de l'historique de conversation avec un message système dédié
         self.messages = [
-            {"role": "system", "content": "Tu es un chatbot expert dans le domaine de l'éducation. Tu fournis des réponses précises, détaillées et sourcées aux questions posées, en t'appuyant sur des extraits fiables et des connaissances approfondies dans ce domaine."}
+            {
+                "role": "system", 
+                "content": (
+                    "Tu es un chatbot expert dans le domaine de l'éducation. Ta mission est de répondre aux demandes "
+                    "des utilisateurs de manière naturelle et conversationnelle. Adapte ton style en fonction de la nature de la demande :\n"
+                    " - Si l'utilisateur pose une question pédagogique, appuie-toi sur le contexte externe (base Pinecone, documents) pour fournir une réponse détaillée, sourcée et précise.\n"
+                    " - Sinon, répond de manière conviviale tout en précisant que tes réponses se concentrent principalement sur l'éducation."
+                )
+            }
         ]
-        
-        # Prompt template inchangé
+        self.max_history_messages = 10
+
+
         self.prompt_template = PromptTemplate(
             template="""
-            Tu es un expert en {expertise}.
-            Réponds précisément à la question posée en utilisant uniquement les extraits fiables fournis ci-dessous.
-            Explique chaque événement en détaillant ses causes et conséquences immédiates.
-            Corrige les erreurs et reformule les réponses de manière claire et exacte.
-            Évite d'inventer des informations ou de faire des suppositions.
-
-            Contexte :
+            Tu es un chatbot expert dans le domaine de l'éducation.
+            Tâche : adapte ton style de réponse en fonction de la nature de l'entrée de l'utilisateur.
+            - Si l'entrée est une question pédagogique, utilise le contexte suivant pour fournir une réponse détaillée, sourcée et précise.
+            - Sinon, répond de manière naturelle et conviviale sans intégrer le contexte externe.
+ 
+            Contexte (optionnel) :
             {context}
 
-            Question :
+            Message de l'utilisateur :
             {question}
 
-            Réponse détaillée, précise et sourcée :
+            Réponse :
             """,
-            input_variables=["expertise", "context", "question"]
+            input_variables=["context", "question"]
         )
     
     def extract_text_from_document(self, file) -> str:
-        """Extrait le texte d'un document (PDF, TXT, DOCX, ou image)."""
+        """Extrait le texte d'un document (PDF, TXT, DOCX ou image)."""
         try:
             if file.filename.endswith(".pdf"):
                 reader = PdfReader(file)
@@ -83,37 +88,125 @@ class Service_MODEL:
         except Exception as e:
             raise Exception(f"Erreur lors de l'extraction du texte : {str(e)}")
     
-    def predict_category(self, question: str) -> str:
+    def is_greeting(self, message: str) -> bool:
+        """Vérifie si le message est une salutation ou très court."""
+        greetings = {"bonjour", "salut", "hello", "coucou", "bonsoir"}
+        tokens = set(message.strip().lower().split())
+        return len(tokens.intersection(greetings)) > 0 or len(message.strip().split()) <= 2
+
+    def is_recall_query(self, message: str) -> bool:
+        """Détecte si le message demande un rappel (ex. : 'Quelle était ma dernière question ?')."""
+        lowered = message.lower()
+        return "dernière question" in lowered or "précédente" in lowered
+
+    def predict_category(self, question: str) -> bool:
+        """
+        Utilise un classificateur zéro-shot pour déterminer si la question porte sur l'éducation.
+        Renvoie True si le label "éducation" obtient un score significatif.
+        Vous pouvez ajuster le seuil ici si besoin.
+        """
         classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-        candidate_labels = ["histoire", "mathématiques", "sciences", "philosophie", "économie", "éducation"]
+        candidate_labels = ["éducation", "non-éducation"]
         result = classifier(question, candidate_labels)
-        return f"éducation, {result['labels'][0]}"
+        education_score = 0.0
+        non_education_score = 0.0
+        for label, score in zip(result["labels"], result["scores"]):
+            if label.lower() in ["éducation", "education"]:
+                education_score = score
+            else:
+                non_education_score = score
+    
+        return education_score > non_education_score and education_score > 0.65
+
+    def update_summary_buffer(self) -> None:
+        """
+        Si l'historique dépasse le seuil, génère un résumé synthétique et réinitialise l'historique
+        en conservant le message système initial.
+        """
+        conversation_text = "\n".join(
+            [f"{msg['role']} : {msg['content']}" for msg in self.messages if msg['role'] != "system"]
+        )
+        summary_prompt = (
+            "Synthétise de manière concise la conversation suivante en extrayant les points clés :\n\n"
+            + conversation_text
+        )
+        try:
+            summary_response = self.hf_client.chat_completion(
+                messages=[{"role": "system", "content": summary_prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            summary = summary_response["choices"][0]["message"]["content"]
+        except Exception as e:
+            summary = "Impossible de générer un résumé de la conversation en raison d'une erreur."
+            print(f"Erreur lors du résumé : {str(e)}")
+        
+        system_message = self.messages[0]
+        self.messages = [
+            system_message,
+            {"role": "assistant", "content": f"Résumé de la conversation précédente : {summary}"}
+        ]
     
     def handle_prediction(self: Self, user_input: str, documents: List = None) -> str:
-        # Extraction et concaténation du texte provenant des documents (si présents)
+        if self.is_greeting(user_input):
+            greeting_response = "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
+            self.messages.append({"role": "user", "content": user_input})
+            self.messages.append({"role": "assistant", "content": greeting_response})
+            return greeting_response
+
+
+        if self.is_recall_query(user_input):
+            last_question = None
+            for msg in reversed(self.messages):
+                if msg["role"] == "user" and not self.is_recall_query(msg["content"]):
+                    last_question = msg["content"]
+                    break
+            if last_question:
+                recall_response = f"Votre dernière question était : {last_question}"
+            else:
+                recall_response = "Je n'ai pas de question précédente enregistrée."
+            self.messages.append({"role": "user", "content": user_input})
+            self.messages.append({"role": "assistant", "content": recall_response})
+            return recall_response
+
+        if self.predict_category(user_input):
+            extra_instructions = (
+                "Réponds de manière naturelle, conversationnelle et experte. "
+                "Utilise le contexte s'il est pertinent et cite les sources le cas échéant."
+            )
+        else:
+            extra_instructions = (
+                "Note : Bien que votre question ne semble pas directement liée à l'éducation, "
+                "je vais tenter d'y répondre en m'appuyant sur mes connaissances en éducation."
+            )
+    
         combined_document_text = ""
         if documents:
             document_texts = [self.extract_text_from_document(doc) for doc in documents]
             combined_document_text = " ".join(document_texts)
 
-        # Récupération des documents pertinents via le retriever
         docs = self.retriever.invoke(user_input)
-        context = combined_document_text + "\n\n" if combined_document_text else ""
-        context += "\n\n".join([doc.page_content for doc in docs])
+        pinecone_context = "\n\n".join([doc.page_content for doc in docs])
+        
 
-        # Identification de l'expertise via le classificateur
-        expertise = self.predict_category(user_input)
-
-        # Préparation du prompt utilisateur en incluant l'expertise et le contexte
-        if context:
-            user_input = f"Expertise : {expertise}\n\nContexte fourni : {context}\n\nQuestion : {user_input}"
+        if combined_document_text:
+            context = combined_document_text + "\n\n" + pinecone_context
         else:
-            user_input = f"Expertise : {expertise}\n\nQuestion : {user_input}"
+            context = pinecone_context
+        if not context.strip():
+            context = "Aucun contexte supplémentaire n'est disponible."
         
-        # On ajoute l'entrée utilisateur comme message "user"
-        self.messages.append({"role": "user", "content": user_input})
+        formatted_prompt = self.prompt_template.format(
+            context=context,
+            question=user_input,
+            extra_instructions=extra_instructions  
+                                                
+        )
+        self.messages.append({"role": "user", "content": formatted_prompt})
         
-        # Appel au modèle en utilisant l'historique complet
+        if len(self.messages) > self.max_history_messages:
+            self.update_summary_buffer()
+
         try:
             response = self.hf_client.chat_completion(
                 messages=self.messages,
@@ -124,11 +217,10 @@ class Service_MODEL:
         except Exception as e:
             return f"Erreur lors de l'appel au modèle : {str(e)}"
 
-        # Ajout de la réponse du modèle à l'historique
         self.messages.append({"role": "assistant", "content": assistant_reply})
 
-        # Récupération des liens sources issus des documents, s'ils existent
         video_links = []
+        docs = self.retriever.invoke(user_input)
         for doc in docs:
             if 'url' in doc.metadata:
                 video_links.append(doc.metadata['url'])

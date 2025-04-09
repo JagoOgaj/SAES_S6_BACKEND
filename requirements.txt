@@ -32,5 +32,5 @@ requests
 user-agents
 flask-socketio 
 PyPDF2
-docx
+python-docx
 pytesseract
