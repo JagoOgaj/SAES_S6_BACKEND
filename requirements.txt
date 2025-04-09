@@ -34,3 +34,4 @@ flask-socketio
 PyPDF2
 python-docx
 pytesseract
+faiss-cpu
