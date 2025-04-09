@@ -9,9 +9,7 @@ from backend.app.core.const.enum import (
 from backend.app.services.models_service import Service_MODEL
 from marshmallow import ValidationError
 
-
 bp_model = Blueprint(ENUM_BLUEPRINT_ID.MODEL.value, __name__)
-
 
 @bp_model.route(ENUM_ENDPOINT_MODEL.PREDICT.value, methods=[ENUM_METHODS.POST.value])
 def predict(typeModel: str):
@@ -24,14 +22,15 @@ def predict(typeModel: str):
                 message="Le champ 'userInput' est requis.",
             )
 
-        documents = request.files.getlist("documents[]")
-        document_names = []
-        if documents:  # Vérification
-            for document in documents:
-                document_names.append(document.filename)
+        all_documents = []
+        for key in request.files.keys():
+            if key.startswith("documents"):
+                all_documents.extend(request.files.getlist(key))
+        document_names = [doc.filename for doc in all_documents]
 
         model = Service_MODEL(typeModel)
-        message = model.handle_prediction(user_input, documents)
+
+        message = model.handle_prediction(user_input, all_documents)
 
         return create_json_response(
             status="success",
