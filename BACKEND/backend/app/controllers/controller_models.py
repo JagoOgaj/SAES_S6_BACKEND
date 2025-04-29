@@ -8,11 +8,17 @@ from backend.app.core.const.enum import (
 )
 from backend.app.services.models_service import Service_MODEL
 from marshmallow import ValidationError
+from typing import Dict
+
+model_instances: Dict[str, Service_MODEL] = {}
 
 bp_model = Blueprint(ENUM_BLUEPRINT_ID.MODEL.value, __name__)
 
 @bp_model.route(ENUM_ENDPOINT_MODEL.PREDICT.value, methods=[ENUM_METHODS.POST.value])
 def predict(typeModel: str):
+    if typeModel not in model_instances:
+        model_instances[typeModel] = Service_MODEL(typeModel)
+    model = model_instances[typeModel]
     try:
         user_input = request.form.get("userInput", "").strip()
         if not user_input:
@@ -27,8 +33,6 @@ def predict(typeModel: str):
             if key.startswith("documents"):
                 all_documents.extend(request.files.getlist(key))
         document_names = [doc.filename for doc in all_documents]
-
-        model = Service_MODEL(typeModel)
 
         message = model.handle_prediction(user_input, all_documents)
 
