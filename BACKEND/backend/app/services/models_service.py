@@ -17,7 +17,7 @@ import json
 import numpy as np
 from langchain.vectorstores import FAISS
 from langchain.chains.conversation.memory import ConversationBufferWindowMemory
-from langchain_pinecone import PineconeVectorStore  # Import de Pinecone
+from langchain_pinecone import PineconeVectorStore 
 
 load_dotenv()
 
@@ -26,12 +26,9 @@ class Service_MODEL:
         self.typeModel = typeModel
         self.target_dimension = 768 
         
-        # Initialisation des embedders pour la recherche
         self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
         self.embeddings2 = HuggingFaceEmbeddings(model_name="sentence-transformers/distiluse-base-multilingual-cased-v1")
-        
-        # Initialisation de la recherche pour la base YouTube via Pinecone
-        # Assure-toi que l'index Pinecone est créé et que la variable d'environnement PINECONE_API_KEY est définie.
+    
         index_name = "education-index"
         vectorstore = PineconeVectorStore(index_name=index_name, embedding=self.embeddings, text_key='content')
         self.retriever = vectorstore.as_retriever(
@@ -39,10 +36,6 @@ class Service_MODEL:
             search_kwargs={"k": 7, "score_threshold": 0.5, "include_metadata": True, "include_values": True}
         )
         
-        # Recherche pour les PDF (nous continuons d'utiliser FAISS pour les PDF)
-        # Ces fichiers (index.faiss, etc.) sont générés séparément pour les PDF.
-    
-        # Message système initial
         self.messages = [
             {
                 "role": "system", 
@@ -55,7 +48,6 @@ class Service_MODEL:
             }
         ]
         
-        # Mémoire de conversation (fenêtre de 6 échanges)
         self.memory = ConversationBufferWindowMemory(k=6, memory_key="chat_history", return_messages=True)
     
         self.prompt_template = PromptTemplate(
@@ -128,8 +120,6 @@ class Service_MODEL:
         return text.strip()
     
     def search_with_pinecone(self, query: str, k: int = 5) -> List[str]:
-        # Utilise le retriever Pinecone pour récupérer les documents de la base YouTube
-        # Le retriever renvoie une liste d'objets ayant la propriété page_content
         docs = self.retriever.invoke(query)
         return [self.clean_text(doc.page_content) for doc in docs]
 
@@ -166,13 +156,10 @@ class Service_MODEL:
                 "je vais tenter d'y répondre en m'appuyant sur mes connaissances en éducation."
             )
 
-        # Préparer le contexte
         if documents:
-            # Utiliser uniquement les documents fournis par l'utilisateur
             document_texts = [self.extract_text_from_document(doc) for doc in documents]
             context = self.clean_text(" ".join(document_texts))
         else:
-            # Fusionner le contexte provenant de la base Pinecone (vidéo youtube) et des PDF stockés dans la base
             retrieved_texts = self.search_with_pinecone(user_input)
             current_context = "\n\n".join(retrieved_texts)
             current_context = self.clean_text(current_context)
@@ -190,7 +177,6 @@ class Service_MODEL:
             else:
                 context = "Aucun contexte supplémentaire n'est disponible."
 
-        # Charger l'historique de conversation depuis la mémoire
         mem_variables = self.memory.load_memory_variables({})
         chat_history = mem_variables.get("chat_history", "")
 
